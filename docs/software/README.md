@@ -286,134 +286,122 @@ SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS;
 
 ## RESTfull сервіс для управління даними
 
-### Index.js
+### schema.prisma
 
+```js
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Question {
+  id      Int     @id @default(autoincrement())
+  text    String
+  type    Int
+  quiz_id Int
+}
 ```
-'use strict';
 
-const express = require('express');
-const { Pool } = require('./db/pool.js');
-const { get, getAll, post, deleted, update } = require('./controller/controllers.js')
+### index.js
 
+```js
+const express = require("express");
 const app = express();
-const jsonParse = express.json();
 
-app.get('/question/:id', get);
-app.get('/questions/', getAll);
-app.post('/question/', jsonParse, post);
-app.put('/question/:id', jsonParse, update);
-app.delete('/question/:id', deleted);
+const { PrismaClient } = require("@prisma/client");
+const prisma = new PrismaClient();
 
-app.listen(3000, () => {
-    console.log('Server is running on http://localhost:3000');
-});
-```
+app.listen(4444);
+app.use(express.json());
 
-### Pool.js
-
-```
-'use strict';
-
-const mysql = require('mysql2');
-
-const Pool = mysql.createConnection({
-    host: "localhost",
-    user: "root",
-    password: "",
-    database: "mydb"
+app.get("/questions", async (req, res) => {
+  const questions = await prisma.question.findMany();
+  res.status(200).json(questions);
 });
 
-module.exports = { Pool };
-```
-
-### Controllers.js
-
-```
-'use strict';
-
-const { Pool } = require('../db/pool.js');
-
-const getMaxQuestionId = () => {
-    const sql = 'SELECT MAX(id) FROM mydb.questions';
-    return new Promise((resolve, reject) => {
-        Pool.query(sql, (error, result, fields) => {
-            if (error) {
-                console.error('Error fetching max question ID:', error);
-                return reject(error);
-            }
-            return resolve(result);
-        });
+app.get("/questions/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const question = await prisma.question.findUnique({
+      where: { id: parseInt(id) },
     });
-};
+    if (question) {
+      res.status(200).json(question);
+    } else {
+      res.status(404).json({ message: "Question not found" });
+    }
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
 
-const get = (req, res) => {
-    const sql = `SELECT * FROM mydb.questions WHERE id = ${req.params.id}`;
-    Pool.query(sql, (error, result, fields) => {
-        if (error) {
-            console.error('Error fetching question:', error);
-            return res.status(500).json(error);
-        }
-        if (result.length) {
-            res.send(result);
-        } else {
-            res.sendStatus(404);
-        }
+app.post("/questions", async (req, res) => {
+  try {
+    const { text, type, quiz_id } = req.body;
+    const question = await prisma.question.create({
+      data: {
+        text: text,
+        type: type,
+        quiz_id: quiz_id,
+      },
     });
-};
+    res.status(200).json(question);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
 
-const getAll = (req, res) => {
-    const sql = 'SELECT * from mydb.questions';
-    Pool.query(sql, (error, result, fields) => {
-        if (error) {
-            console.error('Error fetching all questions:', error);
-            return res.status(500).json(error);
-        }
-        res.send(result);
+app.patch("/questions/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { text, type, quiz_id } = req.body;
+    const question = await prisma.question.findUnique({
+      where: { id: parseInt(id) },
     });
-};
+    if (question) {
+      const userUpdated = await prisma.question.update({
+        where: { id: parseInt(id) },
+        data: {
+          text,
+          type,
+          quiz_id,
+        },
+      });
+      res.status(200).json(userUpdated);
+    } else {
+      res.status(404).json({ message: "User not found" });
+    }
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
 
-const post = (req, res) => {
-    if (!req.body) return res.sendStatus(400);
-    getMaxQuestionId().then(data => {
-        let maxId = data[0]['MAX(id)'];
-        const sql = `INSERT INTO mydb.questions (id, type, text, quiz_id) VALUES (${++maxId},\"${req.body.type}\", \"${req.body.text}\", ${req.body.quiz_id})`;
-        Pool.query(sql, (error, result, fields) => {
-            if (error) return res.status(500).json(error);
-            result ? res.send(result) : res.sendStatus(404);
-        });
+app.delete("/questions/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const question = await prisma.question.findUnique({
+      where: { id: parseInt(id) },
     });
-};
-
-const deleted = (req, res) => {
-    const sql = `DELETE FROM mydb.questions WHERE id = ${req.params.id}`;
-    Pool.query(sql, (error, result, fields) => {
-        if (error) {
-            console.error('Error deleting question:', error);
-            return res.status(500).json(error);
-        }
-        if (result.affectedRows) {
-            res.send(result);
-        } else {
-            res.sendStatus(404);
-        }
-    });
-};
-
-const update = (req, res) => {
-    if (!req.body) return res.sendStatus(400);
-    const sql = `UPDATE mydb.questions SET type = \"${req.body.type}\", text = \"${req.body.text}\", quiz_id = ${req.body.quiz_id} WHERE id = ${req.params.id}`;
-    Pool.query(sql, (err, result, fields) => {
-        if (err) {
-            console.error('Error updating question:', err);
-            return res.status(500).json(err);
-        }
-        if (result.affectedRows) {
-            res.send(result);
-        } else {
-            res.sendStatus(404);
-        }
-    });
-};
-
-module.exports = { get: get, getAll: getAll, post: post, deleted: deleted, update: update };
+    if (question) {
+      const questionDelete = await prisma.question.delete({
+        where: { id: parseInt(id) },
+      });
+      res.status(200).json({ message: "Question was deleted" });
+    } else {
+      res.status(404).json({ message: "Question not found" });
+    }
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
 ```
